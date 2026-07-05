@@ -570,7 +570,7 @@ async function backupToServerGDrive(token: string, fileId: string, dbData: any) 
 }
 
 // Helper to save to JSON file and background sync to Supabase
-function saveDatabase(keys?: string | string[]) {
+async function saveDatabase(keys?: string | string[]) {
   try {
     if (!(database as any).updatedAt) {
       (database as any).updatedAt = {};
@@ -591,20 +591,72 @@ function saveDatabase(keys?: string | string[]) {
         (database as any).updatedAt[k] = now;
       });
     }
-    fs.writeFileSync(DB_FILE, JSON.stringify(database, null, 2), "utf-8");
-    if (serverGDriveToken && serverGDriveFileId) {
-      backupToServerGDrive(serverGDriveToken, serverGDriveFileId, database).catch(err => {
-        console.error("Gagal sinkronisasi latar belakang ke Google Drive:", err);
-      });
+
+    try {
+      fs.writeFileSync(DB_FILE, JSON.stringify(database, null, 2), "utf-8");
+    } catch (fsErr: any) {
+      console.warn("[FS Save Warning] Gagal menyimpan ke db.json lokal (Mungkin read-only filesystem):", fsErr.message);
     }
 
-    // Sync to Supabase in the background
-    syncToSupabase(keys).catch(err => {
-      console.error("[Supabase Sync] Gagal sinkronisasi otomatis latar belakang:", err.message);
-    });
+    if (serverGDriveToken && serverGDriveFileId) {
+      try {
+        await backupToServerGDrive(serverGDriveToken, serverGDriveFileId, database);
+      } catch (err: any) {
+        console.error("Gagal sinkronisasi ke Google Drive:", err.message);
+      }
+    }
+
+    // Map gallery or admins keys to settings so they are saved to the admin_settings table in Supabase
+    let keysToSync = keys ? (Array.isArray(keys) ? [...keys] : [keys]) : undefined;
+    if (keysToSync) {
+      if (keysToSync.includes("gallery") || keysToSync.includes("admins")) {
+        if (!keysToSync.includes("settings")) {
+          keysToSync.push("settings");
+        }
+      }
+    }
+
+    // Sync to Supabase - await here to prevent Netlify serverless container from freezing before completion
+    try {
+      await syncToSupabase(keysToSync);
+    } catch (err: any) {
+      console.error("[Supabase Sync] Gagal sinkronisasi otomatis:", err.message);
+    }
   } catch (err) {
     console.error("Error saving database: ", err);
   }
+}
+
+function syncMemoryRefs() {
+  if (!database.settings) {
+    database.settings = {} as any;
+  }
+  if (!database.settings.contentTexts) {
+    database.settings.contentTexts = {
+      heroTitle: "Biolink Resmi",
+      heroSubtitle: "Desa Wisata Goa Lawah",
+      description: "Selamat datang di surga tersembunyi Narmada. Destinasi Wisata Alam Goa Lawah menyajikan panorama tebing eksotis, koloni kelelawar alami, aliran air pegunungan yang jernih, dan petualangan camping ground terbaik di tengah kesejukan hutan lebat.",
+      destinationName: "Wisata Alam Goa Lawah",
+      villageName: "Desa Wisata Lebah Sempage - Narmada",
+      footerText: "2026 dikelola oleh Pokdarwis Goa Lawah-Narmada"
+    } as any;
+  }
+  const ct = database.settings.contentTexts as any;
+  if (!ct.gallery) {
+    ct.gallery = (database as any).gallery || [
+      { id: "g-1", url: "/src/assets/images/ticket_flyer_1781677879257.jpg", title: "Keindahan Tebing Goa Lawah" },
+      { id: "g-2", url: "/src/assets/images/camping_rental_1781677897755.jpg", title: "Camping Ground Goa Lawah" },
+      { id: "g-3", url: "/src/assets/images/goa_lawah_logo_1781677843742.jpg", title: "Pokdarwis Goa Lawah" }
+    ];
+  }
+  if (!ct.admins) {
+    ct.admins = database.admins || [
+      { username: "admin", password: "aok123" }
+    ];
+  }
+  // Point memory references to contentTexts to ensure automatic serialization
+  (database as any).gallery = ct.gallery;
+  database.admins = ct.admins;
 }
 
 async function syncToSupabase(keys?: string | string[]) {
@@ -857,8 +909,13 @@ async function pullFromSupabase() {
       console.log("[Supabase Sync] ✅ Berhasil memuat visitor_stats dari Supabase.");
     }
 
+    syncMemoryRefs();
     // Simpan ke db.json lokal agar konsisten
-    fs.writeFileSync(DB_FILE, JSON.stringify(database, null, 2), "utf-8");
+    try {
+      fs.writeFileSync(DB_FILE, JSON.stringify(database, null, 2), "utf-8");
+    } catch (fsErr: any) {
+      console.warn("[FS Save Warning] Gagal menyimpan ke db.json lokal setelah penarikan dari Supabase:", fsErr.message);
+    }
 
   } catch (err: any) {
     console.error("[Supabase Sync] Gagal memuat data dari Supabase pada saat startup:", err.message);
@@ -874,6 +931,7 @@ function loadDatabase() {
         const parsed = JSON.parse(content);
         // Deep merge or assign to handle new fields smoothly
         database = { ...database, ...parsed };
+        syncMemoryRefs();
       }
     } else {
       // Seed initial dummy data for stats to look impressive is better
@@ -944,6 +1002,7 @@ function loadDatabase() {
         }
       ];
 
+      syncMemoryRefs();
       saveDatabase();
     }
   } catch (err) {
@@ -966,19 +1025,24 @@ if (database.settings && database.settings.gmailToken) {
 // -------------------------------------------------------------
 
 // Increment Visitor Statistics
-app.post("/api/visit", (req, res) => {
+app.post("/api/visit", async (req, res) => {
   const today = new Date().toISOString().split("T")[0];
   if (!database.stats.viewsCount[today]) {
     database.stats.viewsCount[today] = 0;
   }
   database.stats.viewsCount[today]++;
   database.stats.totalViews++;
-  saveDatabase();
+  await saveDatabase();
   res.json({ success: true, viewsToday: database.stats.viewsCount[today], totalViews: database.stats.totalViews });
 });
 
 // Retrieve Public Information
-app.get("/api/public-settings", (req, res) => {
+app.get("/api/public-settings", async (req, res) => {
+  try {
+    await pullFromSupabase();
+  } catch (err: any) {
+    console.warn("[GET /api/public-settings] Gagal menarik data dari Supabase, menggunakan data lokal:", err.message);
+  }
   const { settings } = database;
   res.json({
     settings,
@@ -996,11 +1060,16 @@ if (!(database as any).gallery) {
   saveDatabase();
 }
 
-app.get("/api/gallery", (req, res) => {
+app.get("/api/gallery", async (req, res) => {
+  try {
+    await pullFromSupabase();
+  } catch (err: any) {
+    console.warn("[GET /api/gallery] Gagal menarik data dari Supabase, menggunakan data lokal:", err.message);
+  }
   res.json((database as any).gallery || []);
 });
 
-app.post("/api/gallery/add", (req, res) => {
+app.post("/api/gallery/add", async (req, res) => {
   try {
     const { base64Data, title } = req.body;
     if (!base64Data) return res.status(400).json({ error: "Mohon pilih foto terlebih dahulu" });
@@ -1013,7 +1082,7 @@ app.post("/api/gallery/add", (req, res) => {
 
     if (!(database as any).gallery) (database as any).gallery = [];
     (database as any).gallery.unshift(newPhoto);
-    saveDatabase("gallery");
+    await saveDatabase("gallery");
 
     res.json({ success: true, gallery: (database as any).gallery });
   } catch (err: any) {
@@ -1022,7 +1091,7 @@ app.post("/api/gallery/add", (req, res) => {
 });
 
 // Create Booking
-app.post("/api/bookings", (req, res) => {
+app.post("/api/bookings", async (req, res) => {
   try {
     const {
       name,
@@ -1103,7 +1172,7 @@ app.post("/api/bookings", (req, res) => {
     database.bookings.unshift(newBooking); // add to top
     database.stats.totalBookings++;
     database.stats.totalRevenue += totalPrice;
-    saveDatabase();
+    await saveDatabase();
 
     // Trigger real background email notification to wisata.goalawah@gmail.com
     sendBookingNotificationEmail(newBooking).catch(err => {
@@ -1162,7 +1231,7 @@ app.post("/api/bookings/send-auto-reply", async (req, res) => {
 });
 
 // Create Feedback
-app.post("/api/feedback", (req, res) => {
+app.post("/api/feedback", async (req, res) => {
   try {
     const { name, message } = req.body;
     if (!message) {
@@ -1177,7 +1246,7 @@ app.post("/api/feedback", (req, res) => {
     };
 
     database.feedbacks.unshift(newFeedback);
-    saveDatabase();
+    await saveDatabase("feedbacks");
 
     // Trigger real background email notification to wisata.goalawah@gmail.com
     sendFeedbackNotificationEmail(newFeedback).catch(err => {
@@ -1213,7 +1282,12 @@ app.post("/api/admin/login", (req, res) => {
 });
 
 // Retrieve Admin dashboard statistics, bookings list, feedbacks list, custom config settings, accounts
-app.get("/api/admin/dashboard-data", (req, res) => {
+app.get("/api/admin/dashboard-data", async (req, res) => {
+  try {
+    await pullFromSupabase();
+  } catch (err: any) {
+    console.warn("[GET /api/admin/dashboard-data] Gagal menarik data dari Supabase, menggunakan data lokal:", err.message);
+  }
   res.json({
     stats: database.stats,
     bookings: database.bookings,
@@ -1225,13 +1299,13 @@ app.get("/api/admin/dashboard-data", (req, res) => {
 });
 
 // Update core settings & logo urls
-app.post("/api/admin/settings", (req, res) => {
+app.post("/api/admin/settings", async (req, res) => {
   try {
     const { settings } = req.body;
     if (!settings) return res.status(400).json({ error: "No settings provided" });
 
     database.settings = { ...database.settings, ...settings };
-    saveDatabase("settings");
+    await saveDatabase("settings");
     res.json({ success: true, settings: database.settings });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -1239,7 +1313,7 @@ app.post("/api/admin/settings", (req, res) => {
 });
 
 // Change/Upload Logo or general images as base64 strings
-app.post("/api/admin/upload-image", (req, res) => {
+app.post("/api/admin/upload-image", async (req, res) => {
   try {
     const { target, base64Data } = req.body;
     if (!target || !base64Data) {
@@ -1260,7 +1334,7 @@ app.post("/api/admin/upload-image", (req, res) => {
       return res.status(400).json({ error: "Invalid upload target" });
     }
 
-    saveDatabase("settings");
+    await saveDatabase("settings");
     res.json({ success: true, settings: database.settings });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -1268,7 +1342,7 @@ app.post("/api/admin/upload-image", (req, res) => {
 });
 
 // Add to gallery
-app.post("/api/admin/gallery/add", (req, res) => {
+app.post("/api/admin/gallery/add", async (req, res) => {
   try {
     const { base64Data, title } = req.body;
     if (!base64Data) return res.status(400).json({ error: "No image data" });
@@ -1281,7 +1355,7 @@ app.post("/api/admin/gallery/add", (req, res) => {
 
     if (!(database as any).gallery) (database as any).gallery = [];
     (database as any).gallery.unshift(newPhoto);
-    saveDatabase("gallery");
+    await saveDatabase("gallery");
 
     res.json({ success: true, gallery: (database as any).gallery });
   } catch (err: any) {
@@ -1290,14 +1364,14 @@ app.post("/api/admin/gallery/add", (req, res) => {
 });
 
 // Delete from gallery
-app.post("/api/admin/gallery/delete", (req, res) => {
+app.post("/api/admin/gallery/delete", async (req, res) => {
   try {
     const { id } = req.body;
     if (!id) return res.status(400).json({ error: "Id is required" });
 
     if ((database as any).gallery) {
       (database as any).gallery = (database as any).gallery.filter((item: any) => item.id !== id);
-      saveDatabase("gallery");
+      await saveDatabase("gallery");
     }
     res.json({ success: true, gallery: (database as any).gallery });
   } catch (err: any) {
@@ -1306,13 +1380,13 @@ app.post("/api/admin/gallery/delete", (req, res) => {
 });
 
 // Edit text elements on home page
-app.post("/api/admin/texts", (req, res) => {
+app.post("/api/admin/texts", async (req, res) => {
   try {
     const { contentTexts } = req.body;
     if (!contentTexts) return res.status(400).json({ error: "No contentTexts" });
 
     database.settings.contentTexts = { ...database.settings.contentTexts, ...contentTexts };
-    saveDatabase("settings");
+    await saveDatabase("settings");
     res.json({ success: true, settings: database.settings });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -1320,11 +1394,11 @@ app.post("/api/admin/texts", (req, res) => {
 });
 
 // Delete feedback entry
-app.post("/api/admin/feedback/delete", (req, res) => {
+app.post("/api/admin/feedback/delete", async (req, res) => {
   try {
     const { id } = req.body;
     database.feedbacks = database.feedbacks.filter((f) => f.id !== id);
-    saveDatabase("feedbacks");
+    await saveDatabase("feedbacks");
     res.json({ success: true, feedbacks: database.feedbacks });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -1332,11 +1406,11 @@ app.post("/api/admin/feedback/delete", (req, res) => {
 });
 
 // Delete booking entry
-app.post("/api/admin/bookings/delete", (req, res) => {
+app.post("/api/admin/bookings/delete", async (req, res) => {
   try {
     const { id } = req.body;
     database.bookings = database.bookings.filter((b) => b.id !== id);
-    saveDatabase("bookings");
+    await saveDatabase("bookings");
     res.json({ success: true, bookings: database.bookings });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -1344,14 +1418,14 @@ app.post("/api/admin/bookings/delete", (req, res) => {
 });
 
 // Update booking status
-app.post("/api/admin/bookings/update-status", (req, res) => {
+app.post("/api/admin/bookings/update-status", async (req, res) => {
   try {
     const { id, paymentStatus } = req.body;
     const bMatch = database.bookings.find((b) => b.id === id);
     if (!bMatch) return res.status(404).json({ error: "Booking tidak ditemukan" });
     
     bMatch.paymentStatus = paymentStatus;
-    saveDatabase("bookings");
+    await saveDatabase("bookings");
     res.json({ success: true, bookings: database.bookings });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -1359,7 +1433,7 @@ app.post("/api/admin/bookings/update-status", (req, res) => {
 });
 
 // Manage Admin: Modify / Add credentials
-app.post("/api/admin/manage-admin", (req, res) => {
+app.post("/api/admin/manage-admin", async (req, res) => {
   try {
     const { action, username, password, oldUsername } = req.body;
     if (!username || !password) return res.status(400).json({ error: "Username dan Password wajib diisi" });
@@ -1381,7 +1455,7 @@ app.post("/api/admin/manage-admin", (req, res) => {
       database.admins.push({ username, password });
     }
 
-    saveDatabase();
+    await saveDatabase("admins");
     res.json({ success: true, adminsList: database.admins.map((a) => ({ username: a.username })) });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -1389,11 +1463,11 @@ app.post("/api/admin/manage-admin", (req, res) => {
 });
 
 // Reset visitor views statistics
-app.post("/api/admin/reset-views", (req, res) => {
+app.post("/api/admin/reset-views", async (req, res) => {
   try {
     database.stats.viewsCount = {};
     database.stats.totalViews = 0;
-    saveDatabase();
+    await saveDatabase("stats");
     res.json({ success: true, stats: database.stats });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -1401,7 +1475,7 @@ app.post("/api/admin/reset-views", (req, res) => {
 });
 
 // Add / edit visitor views for specific date
-app.post("/api/admin/update-views", (req, res) => {
+app.post("/api/admin/update-views", async (req, res) => {
   try {
     const { date, count } = req.body;
     if (!date) return res.status(400).json({ error: "Tanggal wajib diisi" });
@@ -1412,7 +1486,7 @@ app.post("/api/admin/update-views", (req, res) => {
     // Recalculate total views
     database.stats.totalViews = Object.values(database.stats.viewsCount).reduce((a, b) => a + b, 0);
 
-    saveDatabase();
+    await saveDatabase("stats");
     res.json({ success: true, stats: database.stats });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -1439,13 +1513,13 @@ app.post("/api/admin/gdrive-session", (req, res) => {
 
 
 // API to store current admin's Gmail session details for background server auto-reply
-app.post("/api/admin/gmail-session", (req, res) => {
+app.post("/api/admin/gmail-session", async (req, res) => {
   try {
     const { token } = req.body;
     serverGmailToken = token || null;
     if (database.settings) {
       database.settings.gmailToken = serverGmailToken;
-      saveDatabase("settings");
+      await saveDatabase("settings");
     }
     if (serverGmailToken) {
       console.log("🔄 Server Gmail session stored and persisted. Auto-reply via Gmail is armed.");
@@ -1469,7 +1543,7 @@ app.get("/api/admin/database-export", (req, res) => {
 });
 
 // API to import a whole database JSON object (restored from Google Drive)
-app.post("/api/admin/database-import", (req, res) => {
+app.post("/api/admin/database-import", async (req, res) => {
   try {
     const { importedDatabase } = req.body;
     if (!importedDatabase) {
@@ -1492,7 +1566,8 @@ app.post("/api/admin/database-import", (req, res) => {
       gallery: importedDatabase.gallery || (database as any).gallery || []
     } as any;
 
-    saveDatabase();
+    syncMemoryRefs();
+    await saveDatabase();
     res.json({ success: true, database });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
