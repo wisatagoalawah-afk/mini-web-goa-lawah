@@ -1,0 +1,6 @@
+{
+  "name": "Biolink Desa Wisata Goa Lawah",
+  "description": "Biolink and E-Ticket system of Desa Wisata Lebah Sempage, Narmada, West Lombok with elegant visitor administration panel.",
+  "requestFramePermissions": ["camera", "microphone", "geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

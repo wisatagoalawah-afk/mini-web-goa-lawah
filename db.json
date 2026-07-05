@@ -1,0 +1,111 @@
+{
+  "settings": {
+    "youtubeUrl": "https://www.youtube.com/embed/tM03S3S8-b8",
+    "whatsappUrl": "https://wa.me/6287864455512",
+    "facebookUrl": "https://facebook.com/wisatagoalawah",
+    "instagramUrl": "https://instagram.com/pokdarwis_goalawah",
+    "tiktokUrl": "https://tiktok.com/@wisatagoalawah",
+    "googleMapsUrl": "https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d123!2d116.2!3d-8.5!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x0%3A0x0!2z!5e0!3m2!1sen!2sid!4v1718500000000!5m2!1sen!2sid",
+    "ticketInfoImage": "/src/assets/images/ticket_flyer_1781677879257.jpg",
+    "campingImage": "/src/assets/images/camping_rental_1781677897755.jpg",
+    "paymentImage": "/src/assets/images/qris_payment_1781677862360.jpg",
+    "logoUrl": "/src/assets/images/goa_lawah_logo_1781677843742.jpg",
+    "priceCampingPerson": 10000,
+    "priceCampingMotorcycle": 5000,
+    "priceCampingCar": 10000,
+    "priceVisitPerson": 5000,
+    "priceVisitMotorcycle": 0,
+    "priceVisitCar": 0,
+    "rentalPrices": {
+      "tent": 50000,
+      "matras": 5000,
+      "firewood": 10000,
+      "sleepingBag": 10000
+    },
+    "eTicketActive": true,
+    "disableSupabaseSync": false,
+    "gmailAutoReplyActive": false,
+    "gmailToken": null,
+    "rentalItems": null,
+    "formFields": null,
+    "contentTexts": {
+      "heroTitle": "Biolink Resmi",
+      "footerText": "2026 dikelola oleh Pokdarwis Goa Lawah-Narmada",
+      "description": "Selamat datang di surga tersembunyi Narmada. Destinasi Wisata Alam Goa Lawah menyajikan panorama tebing eksotis, koloni kelelawar alami, aliran air pegunungan yang jernih, dan petualangan camping ground terbaik di tengah kesejukan hutan lebat.",
+      "villageName": "Desa Wisata Lebah Sempage - Narmada",
+      "heroSubtitle": "Desa Wisata Goa Lawah",
+      "destinationName": "Wisata Alam Goa Lawah"
+    }
+  },
+  "bookings": [],
+  "feedbacks": [
+    {
+      "id": "fb-1783012648247",
+      "name": "dww",
+      "message": "dwdwd",
+      "createdAt": "2026-07-02T17:17:28.247Z"
+    },
+    {
+      "id": "fb-1783011856882",
+      "name": "gddg",
+      "message": "ffhf",
+      "createdAt": "2026-07-02T17:04:16.882Z"
+    },
+    {
+      "id": "fb-1783011544562",
+      "name": "gf",
+      "message": "fhf",
+      "createdAt": "2026-07-02T16:59:04.562Z"
+    },
+    {
+      "id": "fb-1782362779835",
+      "name": "dika",
+      "message": "hukk",
+      "createdAt": "2026-06-25T04:46:19.835Z"
+    }
+  ],
+  "stats": {
+    "viewsCount": {
+      "2026-06-18": 2,
+      "2026-06-19": 2,
+      "2026-06-25": 14,
+      "2026-07-02": 30,
+      "2026-07-03": 14,
+      "2026-07-05": 16
+    },
+    "totalViews": 78,
+    "totalBookings": 0,
+    "totalRevenue": 0
+  },
+  "admins": [
+    {
+      "password": "aok123",
+      "username": "admin"
+    }
+  ],
+  "gallery": [
+    {
+      "id": "g-1",
+      "url": "/src/assets/images/ticket_flyer_1781677879257.jpg",
+      "title": "Keindahan Tebing Goa Lawah"
+    },
+    {
+      "id": "g-2",
+      "url": "/src/assets/images/camping_rental_1781677897755.jpg",
+      "title": "Camping Ground Goa Lawah"
+    },
+    {
+      "id": "g-3",
+      "url": "/src/assets/images/goa_lawah_logo_1781677843742.jpg",
+      "title": "Pokdarwis Goa Lawah"
+    }
+  ],
+  "updatedAt": {
+    "settings": "2026-07-05T15:38:56.339Z",
+    "bookings": "2026-07-05T15:35:34.434Z",
+    "feedbacks": "2026-07-05T15:35:34.434Z",
+    "stats": "2026-07-05T15:35:34.434Z",
+    "admins": "2026-07-05T15:35:34.434Z",
+    "gallery": "2026-07-05T15:35:34.434Z"
+  }
+}
